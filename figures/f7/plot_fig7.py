@@ -2,7 +2,7 @@
 fig:parity -- every peak predicted before its run, against the measured peak.
 
 Data: parity_points.csv beside this script; remote rows from
-../f9/remote_bytes.json; predicted = the number written before the run.
+../f10/remote_bytes.json; predicted = the number written before the run.
 
   (a) PARITY, short: measured against predicted (GiB, log2), only tall enough
       to show every arm on y = x.  Shape = mechanism, colour = platform row.
@@ -37,7 +37,7 @@ from matplotlib.lines import Line2D
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "parity_points.csv")
-REMOTE = os.path.join(HERE, "..", "f9", "remote_bytes.json")
+REMOTE = os.path.join(HERE, "..", "f10", "remote_bytes.json")
 REMOTE_EXCLUDE = {"E": "A30 allocator control (expandable segments off)",
                   "G": "idle ballast in the peak (A30, A100)"}
 
@@ -136,8 +136,8 @@ C_H = 0.72
 BOTTOM = 0.36
 FIG_H = (KEY_H + A_H + A_GAP + len(ROWS) * STRIP_H
          + (len(ROWS) - 1) * STRIP_GAP + B_GAP + C_H + BOTTOM)
-OUT_LOCAL = "fig15.png"
-OUT_IN_USE = os.path.join("..", "rendered", "fig15.png")
+OUT_LOCAL = "fig7.png"
+OUT_IN_USE = os.path.join("..", "rendered", "fig7.png")
 
 
 def fwd(r):
@@ -218,7 +218,7 @@ def panel_parity(ax, pts):
     # below the diagonal, where no point can fall (an upper-left box covers
     # the low-x points); the
     # platform-colour key is figure-wide (see main), since (a)-(c) use it.
-    short = {"stock offload": "offload"}       # narrower, as in fig9's key
+    short = {"stock offload": "offload"}       # narrower, as in fig10's key
     labels = [short.get(MECH[m][1], MECH[m][1]) for m in MECH] + ["+ CPU off."]
     # Four entries, filled column-major as static/offload | instrument/+ CPU
     # off., so the two wide labels share a column and the box clears the

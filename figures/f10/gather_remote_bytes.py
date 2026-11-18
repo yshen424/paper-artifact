@@ -1,6 +1,6 @@
-"""Re-read every A30 / L40S / A100 byte arm against its harness line -> remote_bytes.json (fig9 (a)).
+"""Re-read every A30 / L40S / A100 byte arm against its harness line -> remote_bytes.json (fig10 (a)).
 res = measured - current harness line; res_reg = measured - the line registered before the run.
-Run from the repo root:  PYTHONPATH=. python3 figures/f9/gather_remote_bytes.py
+Run from the repo root:  PYTHONPATH=. python3 figures/f10/gather_remote_bytes.py
 """
 import glob, json, os, re
 from harness import PLATFORMS, TIER_A, LLAMA32_3B, Run, static_line, floor_line
@@ -40,7 +40,7 @@ for gpu, pk, job, root in JOBS:
             reg -= 1.5 * x
         out.append(dict(gpu=gpu,job=job,arm=os.path.basename(d),mode=m['mode'],shape='3B' if m['l3b'] else 'tierA',
                         x=x,cap=m['cap'],pred=ln.at(x),meas=meas,res=meas-ln.at(x),res_reg=meas-reg,instant=ln.binding(x),posthoc=posthoc))
-json.dump(out, open('figures/f9/remote_bytes.json','w'), indent=1)
+json.dump(out, open('figures/f10/remote_bytes.json','w'), indent=1)
 for g in ('A30','L40S','A100'):
     r=[o for o in out if o['gpu']==g]
     print(g, len(r), 'max|res| %.4f'%max(abs(o['res']) for o in r), 'posthoc', sum(o['posthoc'] for o in r),

@@ -1,4 +1,4 @@
-# Artifact: What Bounds Long-Context Training on GPU Clusters: A Memory Floor No Offloading Placement Can Pass
+# Artifact: What Bounds Long-Context Training on GPU Clusters: A Memory Floor No Boundary Placement Can Pass
 
 This repository holds what the paper's measurements and predictions rest on:
 - the job scripts, whose headers carry each prediction registered before the run;
@@ -43,20 +43,14 @@ PYTHONPATH=. python3 -m harness --platform v100 --layers 64 --world 4 --ladder 1
 for t in tests/test_*.py; do PYTHONPATH=. python3 "$t" || echo "FAILED $t"; done
 
 # A figure (writes figures/fN/figN.png and figures/rendered/figN.png):
-cd figures/f15 && python3 plot_fig15.py
+cd figures/f7 && python3 plot_fig7.py
 ```
 
-| Paper | Script | | Paper | Script |
-|---|---|---|---|---|
-| Fig. 1 | `figures/f1/plot_fig1.py` | | Fig. 6 | `figures/f14/plot_fig14.py` |
-| Fig. 2 | (a drawing) | | Fig. 7 | `figures/f15/plot_fig15.py` |
-| Fig. 3 | `figures/f5/plot_fig5.py` | | Fig. 8 | `figures/f10/plot_fig10.py` |
-| Fig. 4 | `figures/f6/plot_fig6.py` | | Fig. 9 | `figures/f12/plot_fig12.py` |
-| Fig. 5 | `figures/f13/plot_fig13.py` | | Fig. 10 | `figures/f9/plot_fig9.py` |
+Each folder is numbered by the paper's figure: `figures/fN/plot_figN.py` draws Fig. N (N = 1 and 3–10; Fig. 2 is a drawing).
 
 **The eight-rank jobs and the sizing table:** `remote/rank8/README.md` (the reader's report, and `tools/rank8_time.py` for the time numbers as the paper pools them). **The planner run:** `planner/README.md`.
 
-Fig. 7 (registered against measured peaks) reads `figures/f15/parity_points.csv` for the V100 arms. It reads `figures/f9/remote_bytes.json` for the A30, L40S and A100 arms, which `PYTHONPATH=. python3 figures/f9/gather_remote_bytes.py` rebuilds from `profile_results/`.
+Fig. 7 (registered against measured peaks) reads `figures/f7/parity_points.csv` for the V100 arms. It reads `figures/f10/remote_bytes.json` for the A30, L40S and A100 arms, which `PYTHONPATH=. python3 figures/f10/gather_remote_bytes.py` rebuilds from `profile_results/`.
 
 ## Inside a job folder
 

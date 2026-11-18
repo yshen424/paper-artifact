@@ -1,7 +1,7 @@
 """Offloading's time cost in an eight-rank job, as the paper reports it.
 
 The paper's time protocol drops the first step of every arm as warm-up and pools
-the rest over the repeats (as figures/f12 does for the four-rank platforms).
+the rest over the repeats (as figures/f9 does for the four-rank platforms).
 The in-job reader (tools/remote_frontier.py) drops the first two steps, so its
 taxes differ slightly at the lengths that ran few steps.
 

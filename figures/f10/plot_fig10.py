@@ -1,248 +1,301 @@
 """
-fig:frontier -- the headline measurement.  (eval, single column)
+fig:modern -- V100-fitted predictions, measured on Ampere and Ada.  (eval, single column)
 
-WORLD 4 (headline: 3.423 = 356/104, jobs 7743/7744).
+Drawn from the A30 (633912, 642029, 642032), L40S (630188, 634078, 644212)
+and A100 (8039176, shared DGX node -- bytes do not depend on the neighbour;
+the A100 job ran no capacity arms, so it has no span in (b)) jobs, plus a
+V100 row in (a), so the four platforms read as parallel tests.  Every marker
+is MEASURED; open markers are the predictions registered before each run.
 
-One panel:
-  THE HEADLINE, full token range: static whole-layer checkpointing (its
-      measured line points, x=8 excluded), the engine's W=0 floor with every
-      W=0 rung (x=108/140/280 below the pick cap, 328/356 on the floor), the
-      capacity bracket, the span arrow between the two largest fits, and the
-      two failures that end the span.
+  (a) BYTES CARRY.  Residual (measured peak - harness line) of every byte arm,
+      the line built from V100 calibration only (workspace 16.2559 MiB carried,
+      not refitted).  Re-read here from the job outputs into remote_bytes.json
+      by the same rule the job readers use (max peak over steps 1+).
+      Points whose line needed a term added AFTER the run are drawn grey and
+      labelled with what was registered: the flash plane (+1.5000 MiB/x,
+      registered 0) and the 3B deep-replay instant at x=16
+      (+0.148 MiB as registered).  Excluded and echoed: the A30
+      follow-up's E block (expandable segments OFF, an allocator control the
+      harness is not calibrated for) and G block (an idle ballast tensor is
+      part of the peak by design).
+  (b) SPANS CARRY, ABSOLUTE LENGTHS DO NOT.  Largest fit of stock offload over
+      largest fit of static, measured (filled, whisker = the true ratio's
+      bracket) against the ratio registered before the run (open).  V100 and
+      A30 tier-A L=64; L40S the Llama-3.2-3B shape, with and without FSDP CPU
+      offload on both arms.  L40S 3B registered 194/103 on a card-total input
+      error; the span is insensitive to it.
 
-Encoding: static in house neutral; the engine in blue; every rung filled
-(all measured); red is capacity only.
+Regime: chunked CE 256, fp16 memory-efficient kernel (bf16 / flash arms
+named), fused-input norm, use_cache off, b=1, world 4, W=0.
+SIZING: FIG_W = ps.COL_W (3.33 in), placed at \columnwidth, so
+scale 1; no tight_layout.
 
-WHAT EACH ELEMENT IS (world 4, L=64, c=256, regime B, v=32000, b=1; MiB,
-x = tokens/1024; inputs in ../world4.py):
-  static          1476.80 + 132.320279x; slope world-invariant (7744 S, max
-                  residual 0.006 over x=16/24/48/104).  Fits x=104, OOMs 108.
-  floor W=0       1866.89 + 37.820x, 63 picks.  Slope derived; the intercept
-                  is the one measured on its own frontier rungs (two x, zero
-                  residual), 12.00 MiB below the intercept derived from
-                  parameter counts -- the step-1 gradient pile grows by 3
-                  shards at world 4, not 5.  THE FLOOR IS NOT A FIT.
-  bracket         W=0's own: largest fit 15330.92 (x=356) to ~15438 (x=360:
-                  13.67 GiB live + a 1440.00 MiB request, refused).  Never an
-                  intersection of the depths' brackets.
-  stock offload   measured peaks (7747, world 4: x=100/200/356) on the floor
-                  line, so the text's "both claims measured here" holds; the
-                  forced all-64 arm at x=100 equals offload's peak to the byte
-                  (same marker).
-
-HONESTY CONSTRAINTS: an OOM does not bound capacity from above (upper edge
-dashed, "~" in the caption); only the two failures that end the headline span
-are drawn; 3.6432 is an allowance and stays in the text, not here; the
-peak drawn per rung is the MAXIMUM over the run's steps.
-
-SIZING: FIG_W = SCALE * ps.COL_W = 2.8305 in, included at width=0.85\\columnwidth,
-so the scale factor is still 1 (type, lines and markers are the printed sizes);
-emitted 1698 px at 600 dpi.  No tight_layout / bbox tight.
+The V100 row in (a): its arms are fig7's V100 base-shape points (world 4,
+registered in each job header) restricted to the mechanisms the remote rows
+carry: static, offload, forced all-moved, +/- CPU offload.  The gated
+instrument's arms (below the cap; fig5) are excluded and echoed.  Drawn where
+they landed: the V100 registered miss 7756 offload+cpu x=100 (+18.00; two
+outcomes registered, the alternative held), and static at x=100/104 and
+static+cpu x=112/116 (+0.017 to +0.023), hits under the paper's 0.05 MiB
+tolerance.
 """
 
+import json
 import os
 import sys
-
-import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import paperstyle as ps
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+import matplotlib.transforms as mtransforms
+import numpy as np
 
-MIB_PER_GIB = 1024.0
+HERE = os.path.dirname(os.path.abspath(__file__))
+BYTES = os.path.join(HERE, "remote_bytes.json")
+EXCLUDE_BLK = {"E": "expandable segments off (allocator control)",
+               "G": "idle ballast held in the peak by design"}
 
-import world4 as w4
+# --- spans: (label, measured (off, st), fail rungs (off, st), registered (off, st), source)
+SPANS = [
+    ("V100", (356, 104), (360, 108), (356, 104), "1.14/1.15"),
+    ("A30", (564, 164), (568, 166), (566, 164), "1.31/1.33"),
+    ("L40S 3B", (189, 101), (190, 102), (194, 103), "1.29"),
+    ("L40S 3B\n+ CPU off.", (258, 134), (259, 135), (256, 133), "1.32"),
+]
 
-# --- lines, MiB, x = tokens/1024, b=1, L=64, WORLD 4 ---------------------------
-C_L3, M_L3 = w4.C_STATIC, w4.M_STATIC       # chunked CE ON (7744 block S)
-C_FLOOR_W0, M_FLOOR_W0, _ = w4.FLOORS[0]
+ROWS = [("V100", "tierA", "V100"), ("A30", "tierA", "A30"), ("L40S", "tierA", "L40S"), ("L40S", "3B", "L40S 3B"),
+        ("A100", "tierA", "A100")]
+GPU_C = {"V100": ps.PALETTE["blue_main"], "A30": ps.PALETTE["teal"],
+         "L40S": ps.PALETTE["violet"], "A100": ps.PALETTE["red_strong"]}
+MECH = {"static": "s", "offload": "o", "evict": "D"}
+C_POST = ps.EXTRA["neutral_line"]
+C_NOTE = ps.EXTRA["neutral_text"]
+FS_ANNOT = 7.0
+MS = 3.6
 
-X_MEASURED_L3 = [16, 24, 48, 104]
-
-# --- capacity bracket: the HEADLINE config's own, never an intersection -------
-CAP_LO_MIB = w4.PEAK[(0, 356)]   # largest fit, engine x=356 at W=0 -- achieved
-CAP_HI_MIB = 15438.1             # 13.67 GiB live + a 1440.00 MiB request, refused
-CAP_LO = CAP_LO_MIB / MIB_PER_GIB
-CAP_HI = CAP_HI_MIB / MIB_PER_GIB
-
-# --- engine rungs: (x, max-over-steps peak MiB, picks at that step) -----------
-ENGINE_W0 = [(108, 14957.39, 5),
-             (140, 14751.64, 25),
-             (280, 14166.48, 58),
-             (328, 14271.95313, 63),
-             (356, 15330.92188, 63)]
-# stock offload, world 4 (7747): x -> peak MiB, max over steps
-OFFLOAD = [(100, 5648.9219), (200, 9430.9531), (356, 15330.9219)]
-
-X_STATIC_FIT, X_STATIC_FAIL = w4.X_STATIC_FIT, w4.X_STATIC_FAIL
-X_ENGINE_FIT, X_ENGINE_FAIL = w4.X_ENGINE_FIT[0], w4.X_ENGINE_FAIL[0]
-SPAN_MEASURED = X_ENGINE_FIT / X_STATIC_FIT         # 3.4231
-
-X_MEET_L3 = (CAP_LO_MIB - C_L3) / M_L3
-X_MEET_W0 = (CAP_LO_MIB - C_FLOOR_W0) / M_FLOOR_W0  # 356.0, exact
-
-# --- canvas: inches -----------------------------------------------------------
-# 85% of the column in both directions: LaTeX includes it at
-# width=0.85\columnwidth, so the canvas is authored at that width and the type
-# stays at scale 1.  Label margins are full size; only the data area is smaller.
-SCALE = 0.85
-FIG_W, FIG_H = SCALE * ps.COL_W, 1.46     # 2.8305 in
-PX_W = int(round(FIG_W * ps.DPI))         # 1698
-AX_L, AX_R = 0.46, 0.06
-A_BOTTOM, A_H = 0.36, 1.01
-X_LIM = (0.0, 412.0)
-Y_LIM = (0.0, 18.0)
-Y_SPAN_BAR = 16.55   # above the band: the floor crosses every horizontal below
-                     # it inside [104, 328], which would read as an intersection
-
-# --- semantic colours ----------------------------------------------------------
-C_STATIC = ps.EXTRA["neutral_text"]     # the baseline: house neutral
-C_ENGINE = ps.ROLE["engine"]
-C_CEIL = ps.EXTRA["neutral_line"]
-C_CAP = ps.ROLE["capacity"]
+# Printed at the full column, \includegraphics[width=\columnwidth], so the
+# canvas IS that width and the type stays at scale 1.
+SCALE = 1.0
+FIG_W, FIG_H = SCALE * ps.COL_W, 2.77     # 3.33 in -> 1998 px at 600 dpi
+AX_L, AX_R = 0.70, 0.10
+B_BOTTOM, B_H = 0.34, 0.68
+A_BOTTOM = B_BOTTOM + B_H + 0.33          # 0.33 in holds (a)'s ticks + xlabel
+A_H = FIG_H - 0.14 - A_BOTTOM             # 0.14 in holds the key above (a)
+PANEL_DX = -0.595               # in; (a)/(b) letters, left of the axes
+LINTHRESH = 0.01                # MiB; same symlog threshold as fig7
+A_LIM = (-0.01, 160.0)
+A_YLIM = (-0.40, 4.50)          # row units; 5 rows over A_H
+B_LIM = (1.6, 3.75)
+B_YLIM = (-0.90, 3.66)          # row units; 4 rows over B_H; top pad clears (a)'s xlabel
+CPU_LAB_DY = 3.5                # pt; lifts the hanging label's first line onto its row
+B_REG_DY = 0.38                 # row units the registered marker sits above
 
 OUT_LOCAL = "fig10.png"
+# In the band the arms share a few exact values, so one marker per
+# mechanism, stacked, with a count per row.
 OUT_IN_USE = os.path.join("..", "rendered", "fig10.png")
+STACK_PITCH = 0.175              # row units between stacked mechanism markers (~0.046 in)
+MECH_ORDER = ["static", "offload", "evict", "staticcpu", "offloadcpu"]
 
 
-def line_gib(x, c, m):
-    return (c + m * np.asarray(x, dtype=float)) / MIB_PER_GIB
+V100_MODE = {"static": "static", "offload": "offload", "static+cpu": "staticcpu",
+             "offload+cpu": "offloadcpu"}
 
 
-def clipped(c, m, xlim=X_LIM, ytop=Y_LIM[1]):
-    x_top = (ytop * MIB_PER_GIB - c) / m
-    x = np.linspace(xlim[0], min(xlim[1], x_top), 400)
-    return x, line_gib(x, c, m)
-
-
-def _rect(bottom, height):
-    return [AX_L / FIG_W, bottom / FIG_H,
-            (FIG_W - AX_L - AX_R) / FIG_W, height / FIG_H]
-
-
-def band(ax, label_x=None):
-    ax.axhspan(CAP_LO, CAP_HI, facecolor=C_CAP, alpha=0.30, edgecolor="none",
-               zorder=1)
-    ax.axhline(CAP_LO, color=C_CAP, linewidth=0.8, zorder=2)
-    ax.axhline(CAP_HI, color=C_CAP, linewidth=0.8, linestyle=(0, (2.0, 1.6)),
-               zorder=2)
-
-
-def rung(ax, x, y, size=4.2):
-    ax.plot(x, y, marker="D", markersize=size, linestyle="none",
-            color=C_ENGINE, markeredgecolor="black",
-            markeredgewidth=0.6, zorder=7)
-
-
-def failure(ax, x, y):
-    ax.plot([x], [y], marker="x", markersize=6.2, markeredgewidth=2.6,
-            linestyle="none", color="white", zorder=8)
-    ax.plot([x], [y], marker="x", markersize=4.8, markeredgewidth=1.3,
-            linestyle="none", color=C_CAP, zorder=9)
-
-
-def panel_headline(ax):
-    band(ax)
-    # Upper-left corner, two lines: at 1.28 in the band-to-arrow gap is too
-    # short for the label.
-    ax.text(8.0, CAP_HI + 0.30, "capacity\nbracket", ha="left",
-            va="bottom", fontsize=ps.FS_ANNOT, color=C_CAP, linespacing=0.95)
-
-    ax.plot(*clipped(C_L3, M_L3), color=C_STATIC, linewidth=1.6, zorder=5)
-    ax.plot(X_MEASURED_L3, line_gib(X_MEASURED_L3, C_L3, M_L3), marker="s",
-            markersize=3.3, linestyle="none", color=C_STATIC,
-            markeredgecolor="black", markeredgewidth=0.5, zorder=6)
-    ax.plot(*clipped(C_FLOOR_W0, M_FLOOR_W0), color=C_ENGINE, linewidth=1.6,
-            zorder=5)
-    rung(ax, [e[0] for e in ENGINE_W0], [e[1] / MIB_PER_GIB for e in ENGINE_W0])
-    ax.plot([o[0] for o in OFFLOAD], [o[1] / MIB_PER_GIB for o in OFFLOAD],
-            marker="o", markersize=2.4, linestyle="none", color="black",
-            zorder=8)
-
-    for x_fail, c, m in ((X_STATIC_FAIL, C_L3, M_L3),
-                         (X_ENGINE_FAIL, C_FLOOR_W0, M_FLOOR_W0)):
-        failure(ax, x_fail, float(line_gib([x_fail], c, m)[0]))
-
-    for x_end in (X_STATIC_FIT, X_ENGINE_FIT):
-        ax.plot([x_end, x_end], [CAP_HI, Y_SPAN_BAR], color=C_CEIL,
-                linewidth=0.7, linestyle=(0, (1.6, 1.6)), zorder=3)
-    ax.annotate("", xy=(X_ENGINE_FIT, Y_SPAN_BAR),
-                xytext=(X_STATIC_FIT, Y_SPAN_BAR),
-                arrowprops=dict(arrowstyle="<|-|>", color=C_ENGINE,
-                                linewidth=1.1, mutation_scale=7,
-                                shrinkA=0, shrinkB=0))  # tips at 104 / 356
-                                # exactly; the default 2 pt inset put the
-                                # left head on the static line
-    # Centred right of the arrow's midpoint (230): at a 2.31 in data width the
-    # label's left end otherwise meets the static line above the band.
-    ax.text(250.0, Y_SPAN_BAR + 0.20,
-            f"$x{{=}}{X_STATIC_FIT} \\rightarrow {X_ENGINE_FIT}$:  "
-            f"$\\mathbf{{{SPAN_MEASURED:.3f}}}\\mathbf{{\\times}}$",
-            ha="center", va="bottom", fontsize=ps.FS_ANNOT, color=C_ENGINE)
-
-    # Frameless, right-aligned (handles on the right), short labels on top: the
-    # key's ink is a staircase that fits the triangle under the floor line; a
-    # boxed key at this width crosses the floor near x=150-200.
-    handles = [
-        Line2D([], [], color=C_STATIC, linewidth=1.6, marker="s",
-               markersize=3.3, markeredgecolor="black", markeredgewidth=0.5,
-               label="static baseline"),
-        Line2D([], [], color="black", linewidth=0, marker="o",
-               markersize=2.4, label="stock offload"),
-        Line2D([], [], color=C_ENGINE, linewidth=1.6, marker="D",
-               markersize=4.0, markeredgecolor="black", markeredgewidth=0.6,
-               label="instrument: floor and rungs"),
-        Line2D([], [], color=C_CAP, linewidth=0, marker="x", markersize=4.8,
-               markeredgewidth=1.3, label="smallest shape that OOMs"),
-    ]
-    ax.legend(handles=handles, loc="lower right", bbox_to_anchor=(1.0, 0.0),
-              frameon=False, markerfirst=False, handlelength=1.5,
-              handletextpad=0.5, labelspacing=0.15, borderpad=0.2,
-              borderaxespad=0.2)
-
-    ax.set_xlim(*X_LIM)
-    ax.set_ylim(*Y_LIM)
-    ax.set_xticks([0, 100, 200, 300, 400])
-    ax.set_xlabel("$x$ (1024 tokens per rank)", labelpad=2)
-    ax.set_yticks([0, 5, 10, 15])
-    ax.set_ylabel("peak HBM (GiB)", labelpad=3)
+def load_v100():
+    """fig7's V100 base-shape parity points, as fig10 arms; returns (arms, gated)."""
+    import importlib.util
+    path = os.path.join(HERE, "..", "f7", "plot_fig7.py")
+    spec = importlib.util.spec_from_file_location("plot_fig7", path)
+    f7 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(f7)
+    arms, gated = [], []
+    for r in f7.points():
+        if r["row"] != "V100":
+            continue
+        if r["mechanism"].startswith("engine"):
+            if "force-evict" not in r["notes"].lower():
+                gated.append(r)
+                continue
+            mode = "evict"
+        else:
+            mode = V100_MODE[r["mechanism"]]
+        arms.append(dict(gpu="V100", job=r["job"], arm=f"{r['mechanism']}_x{r['x']}",
+                         mode=mode, shape="tierA", x=r["x"], meas=r["measured_mib"],
+                         res=r["res"], res_reg=r["res"], posthoc=False))
+    return arms, gated
 
 
 def main():
+    arms = json.load(open(BYTES))
+    v100, gated = load_v100()
+    arms = v100 + arms
+    excluded = [a for a in arms if a["arm"].split("_")[0] in EXCLUDE_BLK]
+    arms = [a for a in arms if a["arm"].split("_")[0] not in EXCLUDE_BLK]
+
     ps.apply_publication_style()
     fig = plt.figure(figsize=(FIG_W, FIG_H))
-    a = fig.add_axes(_rect(A_BOTTOM, A_H))
-    panel_headline(a)
+    w = (FIG_W - AX_L - AX_R) / FIG_W
+    ax = fig.add_axes([AX_L / FIG_W, A_BOTTOM / FIG_H, w, A_H / FIG_H])
+    bx = fig.add_axes([AX_L / FIG_W, B_BOTTOM / FIG_H, w, B_H / FIG_H])
 
-    here = os.path.dirname(os.path.abspath(__file__))
-    ps.save(fig, OUT_LOCAL, OUT_IN_USE, script_dir=here, expect_px=PX_W)
+    # ---- (a) residuals against the REGISTERED line -----------------------------
+    ax.axvspan(-LINTHRESH, LINTHRESH, color=ps.PALETTE["neutral"], alpha=0.35,
+               linewidth=0, zorder=0)
+    ax.axvline(0.0, color="black", linewidth=0.6, zorder=1)
+
+    def marker(x, y, mode, gpu):
+        base = mode.replace("cpu", "")
+        ax.plot(x, y, marker=MECH[base], markersize=MS, color=GPU_C[gpu],
+                markeredgecolor="black", markeredgewidth=0.4, linestyle="none",
+                zorder=3)
+        if mode.endswith("cpu"):
+            ax.plot(x, y, marker="o", markersize=1.2, color="white",
+                    linestyle="none", zorder=4)
+
+    stats = []
+    print("(a) in-band stacks: row, value, mechanism, count")
+    for i, (gpu, shape, _) in enumerate(ROWS):
+        y0 = len(ROWS) - 1 - i
+        sel = [a for a in arms if a["gpu"] == gpu and a["shape"] == shape]
+        band = [a for a in sel if abs(a["res_reg"]) < LINTHRESH]
+        # IN THE BAND: arms share a handful of exact values, so one marker per
+        # mechanism present, stacked, at its true x; one count per row.
+        modes = [m for m in MECH_ORDER if any(a["mode"] == m for a in band)]
+        k = len(modes)
+        for j, m in enumerate(modes):
+            ms = [a for a in band if a["mode"] == m]
+            xv = sum(a["res_reg"] for a in ms) / len(ms)
+            y = y0 + ((k - 1) / 2 - j) * STACK_PITCH
+            marker(xv, y, m, gpu)
+            print(f"   {gpu:<5}{shape:<6} {xv:+.4f}  {m:<11} {len(ms)}"
+                  f"  (spread {max(a['res_reg'] for a in ms) - min(a['res_reg'] for a in ms):.4f})")
+        ax.text(0.0035, y0, f"$n{{=}}{len(band)}$", fontsize=FS_ANNOT,
+                color=C_NOTE, ha="left", va="center")
+        # OUTSIDE: the registered misses, one marker each (they differ).
+        out = [a for a in sel if abs(a["res_reg"]) >= LINTHRESH]
+        for j, a in enumerate(sorted(out, key=lambda a: a["res_reg"])):
+            y = y0 + ((j % 3) - 1) * STACK_PITCH
+            marker(a["res_reg"], y, a["mode"], gpu)
+        hits = [a for a in sel if not a["posthoc"]]
+        stats.append((gpu, shape, len(sel), len(hits),
+                      max(abs(a["res_reg"]) for a in hits),
+                      max(abs(a["res"]) for a in sel)))
+
+    # The V100 note is three lines (two would run into the +0.02 MiB misses
+    # at this width); the flash note sits a little lower to clear it, and the
+    # "every other arm" note sits right, off the n = 129 count.
+    ax.text(9.0, 2.88, "flash plane,\n+1.5 MiB/x", fontsize=FS_ANNOT, color=C_NOTE,
+            ha="right", va="center", linespacing=1.0)
+    ax.text(0.24, 1.0, "x=16: a deeper\nreplay instant", fontsize=FS_ANNOT,
+            color=C_NOTE, ha="left", va="center", linespacing=1.0)
+    ax.text(12.0, 3.93, "two\noutcomes\nregistered", fontsize=FS_ANNOT, color=C_NOTE,
+            ha="right", va="center", linespacing=1.0)
+    # The paper's one tolerance, the +/-0.05 MiB written into the job scripts
+    # before each run.
+    ax.text(0.03, 2.0, "every other arm\nwithin 0.05 MiB", fontsize=FS_ANNOT,
+            color=C_NOTE, ha="left", va="center", linespacing=1.0)
+    # key for the stacks ("one marker per mechanism; n = arms") is in the caption
+
+    ax.set_xscale("symlog", linthresh=LINTHRESH, linscale=2.2)
+    ax.set_xlim(*A_LIM)
+    ax.set_xticks([-0.01, -0.005, 0, 0.005, 0.01, 0.1, 1, 10, 100])
+    ax.set_xticklabels(["$-$.01", "", "0", "", ".01", "0.1", "1", "10", "100"])
+    ax.minorticks_off()
+    ax.set_ylim(*A_YLIM)
+    ax.set_yticks(range(len(ROWS)))
+    ax.set_yticklabels([r[2] for r in ROWS][::-1])
+    # Row labels carry the platform colour, so no colour key is needed.
+    for t, r in zip(ax.get_yticklabels(), ROWS[::-1]):
+        t.set_color(GPU_C[r[0]])
+    ax.tick_params(axis="y", length=0, pad=3)
+    ax.tick_params(axis="x", pad=2)
+    ax.set_xlabel("measured $-$ registered line (MiB)", labelpad=2)
+    ps.panel_label(ax, "(a)", x=PANEL_DX / (w * FIG_W), y=1.0)
+
+    handles = [Line2D([], [], marker=MECH[m], color="white", markeredgecolor="black",
+                      markeredgewidth=0.6, markersize=MS + 0.4, linestyle="none")
+               for m in ("static", "offload", "evict")]
+    handles.append((Line2D([], [], marker="s", color="white", markeredgecolor="black",
+                           markeredgewidth=0.6, markersize=MS + 0.4, linestyle="none"),
+                    Line2D([], [], marker="o", color="black", markersize=1.4,
+                           linestyle="none")))
+    ax.legend(handles, ["static", "offload", "all moved", "+ CPU off."],
+              loc="lower left", bbox_to_anchor=(-0.02, 1.0), ncol=4,
+              fontsize=FS_ANNOT, handlelength=0.8, handletextpad=0.3, columnspacing=0.7,
+              borderaxespad=0.1, frameon=False, borderpad=0.0)   # single row above: no box
+
+    # ---- (b) spans --------------------------------------------------------------
+    for i, (label, (fo, fs), (xo, xs), (ro, rs), _) in enumerate(SPANS):
+        y = len(SPANS) - 1 - i
+        gpu = label.split(" ")[0]
+        c = GPU_C[gpu]
+        meas, lo, hi = fo / fs, fo / xs, xo / fs
+        reg = ro / rs
+        bx.plot([lo, hi], [y, y], color=c, linewidth=1.0, solid_capstyle="butt", zorder=2)
+        bx.plot(meas, y, marker="o", markersize=MS + 0.6, color=c,
+                markeredgecolor="black", markeredgewidth=0.6, zorder=4)
+        bx.plot(reg, y + B_REG_DY, marker="v", markersize=MS + 0.4, color="white",
+                markeredgecolor=c, markeredgewidth=0.9, zorder=4)
+        bx.text(hi + 0.05, y, f"{meas:.3f}", fontsize=FS_ANNOT, color=c,
+                ha="left", va="center")
+    bx.set_xlim(*B_LIM)
+    bx.set_ylim(*B_YLIM)
+    bx.set_yticks(range(len(SPANS)))
+    bx.set_yticklabels([s[0] for s in SPANS][::-1])
+    for t, sp in zip(bx.get_yticklabels(), SPANS[::-1]):
+        t.set_color(GPU_C[sp[0].split(" ")[0]])
+    bx.tick_params(axis="y", length=0, pad=3)
+    # The two-line label hangs from its row (first line on the row, the CPU
+    # qualifier below), so it reads with its own row, not the one above.
+    # After tick_params, which resets label transforms.
+    cpu_lab = bx.get_yticklabels()[0]
+    cpu_lab.set_linespacing(1.0)
+    cpu_lab.set_va("top")
+    cpu_lab.set_transform(cpu_lab.get_transform() + mtransforms.ScaledTranslation(
+        0, CPU_LAB_DY / 72, fig.dpi_scale_trans))
+    bx.tick_params(axis="x", pad=2)
+    bx.set_xlabel(r"span: offload over static (largest fits, $\times$)", labelpad=2)
+    # The row labels name the platform by colour, so the key shows the two
+    # marker kinds only, in neutral grey.
+    grey = ps.EXTRA["neutral_text"]
+    meas_h = Line2D([], [], marker="o", color=grey, markeredgecolor="black",
+                    markeredgewidth=0.6, markersize=MS + 0.6, linestyle="none")
+    reg_h = Line2D([], [], marker="v", color="white", markeredgecolor=grey,
+                   markeredgewidth=0.9, markersize=MS + 0.4, linestyle="none")
+    bx.legend([meas_h, reg_h], ["measured", "registered"], loc="center",
+              bbox_to_anchor=(0.62, 0.30), ncol=1, fontsize=FS_ANNOT,
+              handlelength=1.0, handletextpad=0.4, labelspacing=0.3,
+              borderaxespad=0.0)
+    ps.panel_label(bx, "(b)", x=PANEL_DX / (w * FIG_W), y=1.0)
+
+    ps.save(fig, OUT_LOCAL, OUT_IN_USE, script_dir=HERE,
+            expect_px=int(round(FIG_W * ps.DPI)))
     plt.close(fig)
 
-    print(f"  bracket            [{CAP_LO_MIB:.3f}, ~{CAP_HI_MIB:.1f}] MiB"
-          f"  = [{CAP_LO:.4f}, {CAP_HI:.4f}] GiB, {CAP_HI_MIB - CAP_LO_MIB:.1f}"
-          " MiB wide")
-    print(f"  meets bracket at   +chunked CE x={X_MEET_L3:.2f}"
-          f"   W=0 x={X_MEET_W0:.2f} (exact)")
-    print(f"  span, measured     {X_ENGINE_FIT}/{X_STATIC_FIT}"
-          f" = {SPAN_MEASURED:.4f}   (crossings give"
-          f" {X_MEET_W0 / X_MEET_L3:.4f})")
-    print(f"  ratio of ceilings  [{X_ENGINE_FIT / X_STATIC_FAIL:.3f},"
-          f" {X_ENGINE_FAIL / X_STATIC_FIT:.3f})")
-    for x, peak in OFFLOAD:
-        print(f"  offload x={x:<4d} peak {peak:9.4f}  floor"
-              f" {C_FLOOR_W0 + M_FLOOR_W0 * x:9.4f}"
-              f"  resid {peak - C_FLOOR_W0 - M_FLOOR_W0 * x:+.4f}")
-    for x, peak, picks in ENGINE_W0:
-        floor = C_FLOOR_W0 + M_FLOOR_W0 * x
-        print(f"  W0 x={x:<4d} peak {peak:9.4f}  picks {picks:2d}"
-              f"  static line {C_L3 + M_L3 * x:9.2f}"
-              f"  floor {floor:9.2f}  resid {peak - floor:+8.4f}")
-    for tag, x_fail, c, m in (("static", X_STATIC_FAIL, C_L3, M_L3),
-                              ("W0", X_ENGINE_FAIL, C_FLOOR_W0, M_FLOOR_W0)):
-        print(f"  failure {tag:<6s} x={x_fail} at"
-              f" {c + m * x_fail:9.2f} MiB"
-              f"  ({c + m * x_fail - CAP_HI_MIB:+.2f} vs band top)")
+    # ---- echo -----------------------------------------------------------------
+    print("(a) byte residuals: measured - line registered before the run (current harness in brackets)")
+    for gpu, shape, n, nh, worst_reg, worst_now in stats:
+        print(f"  {gpu:<5} {shape:<6} {n:3d} arms, {nh} hit as registered (max |r| {worst_reg:.4f} MiB);"
+              f" against today's harness max |r| {worst_now:.4f} MiB")
+    for a in arms:
+        if a["posthoc"]:
+            print(f"    MISS as registered: {a['job']} {a['arm']}  {a['res_reg']:+.4f}"
+                  f"  [{a['res']:+.4f} with the post-hoc term]")
+    print(f"  EXCLUDED {len(gated)} gated V100 instrument arms (below the cap; fig5)")
+    v_out = [a for a in v100 if abs(a["res_reg"]) >= LINTHRESH]
+    for a in v_out:
+        print(f"    V100 outside band: {a['job']} {a['arm']}  {a['res_reg']:+.4f}")
+    rest = [a for a in arms if not a["posthoc"] and abs(a["res_reg"]) < 1.0]
+    print(f"  every arm but the labelled misses: max |r| {max(abs(a['res_reg']) for a in rest):.4f} MiB")
+    for a in excluded:
+        print(f"  EXCLUDED {a['job']} {a['arm']}  {a['res']:+.4f}  "
+              f"{EXCLUDE_BLK[a['arm'].split('_')[0]]}")
+    print("(b) spans")
+    for label, (fo, fs), (xo, xs), (ro, rs), src in SPANS:
+        print(f"  {label:<16} measured {fo}/{fs} = {fo / fs:.3f}  true ratio in"
+              f" [{fo / xs:.3f}, {xo / fs:.3f})  registered {ro}/{rs} = {ro / rs:.3f}")
 
 
 if __name__ == "__main__":
